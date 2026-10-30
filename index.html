@@ -1,0 +1,1551 @@
+<!DOCTYPE html>
+<html lang="th" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบจัดตารางสอนและบริหารจัดการสถานศึกษา (Cloud Sync)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Alpine.js -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts: Sarabun -->
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Sarabun', sans-serif;
+        }
+        @media print {
+            .no-print {
+                display: none !important;
+            }
+            body {
+                background: white !important;
+                color: black !important;
+            }
+            .print-container {
+                box-shadow: none !important;
+                border: none !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                width: 100% !important;
+            }
+            @page {
+                size: A4 landscape;
+                margin: 10mm;
+            }
+            * {
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 h-full flex flex-col" x-data="appData()" x-init="initSystem()">
+
+    <!-- ================= PIN LOGIN OVERLAY ================= -->
+    <template x-if="!isAuthenticated">
+        <div class="fixed inset-0 bg-indigo-950/90 backdrop-blur-md flex items-center justify-center p-4 z-50">
+            <div class="bg-white rounded-3xl shadow-2xl max-w-md w-full p-8 space-y-6 text-center border border-indigo-100">
+                <div class="w-16 h-16 bg-indigo-100 text-indigo-700 rounded-2xl mx-auto flex items-center justify-center text-3xl shadow-inner">
+                    <i class="fa-solid fa-lock"></i>
+                </div>
+                <div class="space-y-2">
+                    <h2 class="text-2xl font-bold text-gray-900">เข้าสู่ระบบตารางสอน</h2>
+                    <p class="text-xs text-gray-500">กรุณากรอกรหัสผ่านเพื่อเข้าใช้งานระบบบริหารจัดการสถานศึกษา</p>
+                </div>
+
+                <form @submit.prevent="authenticate()" class="space-y-4">
+                    <div class="relative">
+                        <input :type="showPin ? 'text' : 'password'" 
+                               x-model="enteredPin" 
+                               placeholder="กรอกรหัสผ่าน" 
+                               maxlength="6"
+                               autofocus
+                               class="w-full text-center tracking-widest text-xl font-bold border-2 border-indigo-200 rounded-xl px-4 py-3 focus:outline-none focus:border-indigo-600 focus:ring-4 focus:ring-indigo-100 transition">
+                        
+                        <button type="button" @click="showPin = !showPin" class="absolute right-3 top-3.5 text-gray-400 hover:text-indigo-600">
+                            <i class="fa-solid" :class="showPin ? 'fa-eye-slash' : 'fa-eye'"></i>
+                        </button>
+                    </div>
+
+                    <template x-if="loginError">
+                        <p class="text-xs text-rose-600 font-semibold animate-shake">รหัสผ่านไม่ถูกต้อง</p>
+                    </template>
+
+                    <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-indigo-600/30 transition transform hover:-translate-y-0.5">
+                        เข้าสู่ระบบ
+                    </button>
+                </form>
+
+                <div class="text-[11px] text-gray-400 pt-2 border-t border-gray-100">
+                    รหัสผ่านเริ่มต้น: <span class="font-semibold text-gray-600">123456</span>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <!-- Top Navigation / Status Bar -->
+    <header class="bg-indigo-700 text-white shadow-md no-print flex-shrink-0">
+        <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap justify-between items-center gap-3">
+            <div class="flex items-center space-x-3">
+                <div class="bg-white/10 p-2 rounded-lg">
+                    <i class="fa-solid fa-calendar-days text-2xl text-yellow-300"></i>
+                </div>
+                <div>
+                    <h1 class="text-lg font-bold leading-tight" x-text="schoolConfig.schoolName || 'ระบบจัดตารางสอนออนไลน์'"></h1>
+                    <p class="text-xs text-indigo-200">ปีการศึกษา <span x-text="schoolConfig.academicYear"></span> / ภาคเรียนที่ <span x-text="schoolConfig.semester"></span></p>
+                </div>
+            </div>
+
+            <div class="flex items-center space-x-2">
+                <div class="flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-xs font-medium" 
+                     :class="syncStatus === 'synced' ? 'bg-emerald-600/30 text-emerald-100 border border-emerald-400/30' : (syncStatus === 'syncing' ? 'bg-amber-500/30 text-amber-100 border border-amber-400/30' : 'bg-rose-500/30 text-rose-100 border border-rose-400/30')">
+                    <span class="w-2 h-2 rounded-full" :class="syncStatus === 'synced' ? 'bg-emerald-400 animate-pulse' : (syncStatus === 'syncing' ? 'bg-amber-400 animate-spin' : 'bg-rose-400')"></span>
+                    <span x-text="syncMessage"></span>
+                </div>
+
+                <button @click="syncToCloud()" :disabled="isSyncing" class="bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white px-4 py-2 rounded-lg text-sm font-medium shadow transition flex items-center space-x-2 disabled:opacity-50">
+                    <i class="fa-solid fa-cloud-arrow-up" :class="{'fa-spin': isSyncing}"></i>
+                    <span>บันทึกขึ้น Cloud</span>
+                </button>
+
+                <button @click="showDataModal = true" class="bg-indigo-600 hover:bg-indigo-800 text-white px-3 py-2 rounded-lg text-sm font-medium transition" title="สำรอง/นำเข้าข้อมูล">
+                    <i class="fa-solid fa-database"></i>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Navigation Tabs -->
+    <nav class="bg-white border-b border-gray-200 shadow-sm no-print flex-shrink-0">
+        <div class="max-w-7xl mx-auto px-4 flex space-x-1 sm:space-x-4 overflow-x-auto">
+            <button @click="currentTab = 'timetable'" :class="currentTab === 'timetable' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/50' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'" class="py-3 px-3 border-b-2 font-medium text-sm flex items-center space-x-2 whitespace-nowrap transition">
+                <i class="fa-solid fa-table-cells"></i>
+                <span>1. จัดตารางสอนชั้นเรียน</span>
+            </button>
+            <button @click="currentTab = 'teachers'" :class="currentTab === 'teachers' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/50' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'" class="py-3 px-3 border-b-2 font-medium text-sm flex items-center space-x-2 whitespace-nowrap transition">
+                <i class="fa-solid fa-chalkboard-user"></i>
+                <span>2. ตารางสอนครูแต่ละคน</span>
+            </button>
+            <button @click="currentTab = 'substitute'" :class="currentTab === 'substitute' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/50' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'" class="py-3 px-3 border-b-2 font-medium text-sm flex items-center space-x-2 whitespace-nowrap transition">
+                <i class="fa-solid fa-user-clock"></i>
+                <span>3. ระบบสอนแทน</span>
+            </button>
+            <button @click="currentTab = 'subjects'" :class="currentTab === 'subjects' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/50' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'" class="py-3 px-3 border-b-2 font-medium text-sm flex items-center space-x-2 whitespace-nowrap transition">
+                <i class="fa-solid fa-book-open"></i>
+                <span>4. โครงสร้างรายวิชา</span>
+            </button>
+            <button @click="currentTab = 'settings'" :class="currentTab === 'settings' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/50' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'" class="py-3 px-3 border-b-2 font-medium text-sm flex items-center space-x-2 whitespace-nowrap transition">
+                <i class="fa-solid fa-gear"></i>
+                <span>5. ตั้งค่าโรงเรียน/บุคลากร</span>
+            </button>
+            <button @click="currentTab = 'print'" :class="currentTab === 'print' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/50' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'" class="py-3 px-3 border-b-2 font-medium text-sm flex items-center space-x-2 whitespace-nowrap transition">
+                <i class="fa-solid fa-print"></i>
+                <span>6. พิมพ์ตารางสอน (A4)</span>
+            </button>
+        </div>
+    </nav>
+
+    <!-- Content Area -->
+    <main class="flex-grow max-w-7xl w-full mx-auto px-4 py-6 overflow-y-auto">
+
+        <!-- ================= TAB 1: TIMETABLE MATRIX ================= -->
+        <div x-show="currentTab === 'timetable'" class="space-y-6">
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-wrap items-center justify-between gap-4 no-print">
+                <div class="flex items-center space-x-3">
+                    <label class="font-semibold text-gray-700">เลือกห้องเรียน:</label>
+                    <select x-model="selectedClassId" class="border border-gray-300 rounded-lg px-4 py-2 font-medium text-indigo-700 bg-indigo-50/50 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        <template x-for="cls in classes.filter(c => c.active)" :key="cls.id">
+                            <option :value="cls.id" x-text="cls.name"></option>
+                        </template>
+                    </select>
+                </div>
+
+                <div class="flex items-center space-x-3">
+                    <button @click="clearClassTimetable(selectedClassId)" class="bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 px-4 py-2 rounded-lg text-sm font-medium transition flex items-center space-x-2">
+                        <i class="fa-solid fa-trash-can"></i>
+                        <span>ล้างตารางชั้นเรียนนี้</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Validation Warnings -->
+            <template x-if="getClassConflicts(selectedClassId).length > 0 || getAllSystemConflicts().length > 0">
+                <div class="bg-rose-50 border-l-4 border-rose-500 p-4 rounded-lg shadow-md">
+                    <div class="flex items-center space-x-3">
+                        <i class="fa-solid fa-triangle-exclamation text-rose-600 text-2xl shrink-0"></i>
+                        <div>
+                            <h4 class="font-bold text-rose-900 text-base">⚠️ แจ้งเตือน: พบข้อขัดแย้งคาบสอนซ้ำซ้อน</h4>
+                            <ul class="list-disc list-inside text-sm text-rose-800 mt-1 space-y-1">
+                                <template x-for="err in getClassConflicts(selectedClassId)">
+                                    <li class="font-semibold" x-text="err"></li>
+                                </template>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </template>
+
+            <!-- iPad-Style Subject Picker Toolbar (8 items per row) -->
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-100 no-print">
+                <div class="flex justify-between items-center mb-3">
+                    <h3 class="font-bold text-gray-800 flex items-center space-x-2">
+                        <i class="fa-solid fa-book text-indigo-600"></i>
+                        <span>คลังรายวิชาประจำห้อง (แสดงจำนวนคาบที่จัดลงตารางจริง)</span>
+                    </h3>
+                    <span class="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-lg">แถวละ 8 วิชา</span>
+                </div>
+                
+                <div class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3 max-h-64 overflow-y-auto p-1">
+                    <template x-for="subj in subjects.filter(s => s.classId === selectedClassId)" :key="subj.id">
+                        <div draggable="true"
+                             @dragstart="onDragStartSubject(subj, $event)"
+                             @click="selectSubjectForDrop(subj)"
+                             class="p-3 rounded-xl border text-center cursor-pointer transition transform hover:-translate-y-1 shadow-sm flex flex-col justify-between select-none relative bg-gradient-to-br from-indigo-50 to-white hover:bg-indigo-100 border-indigo-200 text-indigo-900"
+                             :class="selectedSubjectForQuickDrop === subj.id ? 'bg-indigo-600 text-white border-indigo-700 ring-2 ring-indigo-300' : ''">
+                            
+                            <div>
+                                <span class="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded" :class="selectedSubjectForQuickDrop === subj.id ? 'bg-indigo-700 text-indigo-100' : 'bg-indigo-100 text-indigo-700'" x-text="subj.code"></span>
+                                <p class="text-xs font-semibold mt-1.5 line-clamp-2 leading-tight" x-text="subj.name"></p>
+                                <p class="text-[10px] opacity-90 mt-1 truncate" :class="selectedSubjectForQuickDrop === subj.id ? 'text-indigo-200' : 'text-indigo-700'" x-text="getTeacherName(subj.teacherId) || 'ยังไม่ระบุครู'"></p>
+                            </div>
+                            <div class="mt-2 text-[10px] opacity-90 flex justify-between items-center pt-1 border-t border-indigo-100/30">
+                                <span x-text="subj.type"></span>
+                                <span class="font-bold px-1.5 py-0.5 rounded" :class="getAssignedSubjectCount(selectedClassId, subj.id) === subj.hours ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'" x-text="getAssignedSubjectCount(selectedClassId, subj.id) + '/' + subj.hours + ' ชม.'"></span>
+                            </div>
+                        </div>
+                    </template>
+                    <template x-if="subjects.filter(s => s.classId === selectedClassId).length === 0">
+                        <div class="col-span-full py-8 text-center text-gray-400 bg-gray-50 rounded-xl border border-dashed border-gray-200">
+                            <i class="fa-solid fa-folder-open text-2xl mb-1"></i>
+                            <p class="text-sm">ยังไม่มีรายวิชาในห้องนี้ ไปที่เมนู "4. โครงสร้างรายวิชา" เพื่อเพิ่มรายวิชา</p>
+                        </div>
+                    </template>
+                </div>
+                <template x-if="selectedSubjectForQuickDrop">
+                    <div class="mt-3 p-2 bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs rounded-lg flex justify-between items-center">
+                        <span><i class="fa-solid fa-hand-pointer mr-1"></i> เลือกรายวิชาแล้ว: <strong x-text="getSubjectName(selectedSubjectForQuickDrop)"></strong> (คลิกช่องในตารางด้านล่างเพื่อวาง)</span>
+                        <button @click="selectedSubjectForQuickDrop = null" class="text-indigo-900 font-bold hover:underline">ยกเลิก</button>
+                    </div>
+                </template>
+            </div>
+
+            <!-- Timetable Matrix Table -->
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <div class="p-4 bg-gray-50 border-b border-gray-200 flex justify-between items-center">
+                    <h3 class="font-bold text-gray-800 text-base flex items-center space-x-2">
+                        <i class="fa-solid fa-calendar text-indigo-600"></i>
+                        <span>ตารางสอนประจำห้อง: <span class="text-indigo-600" x-text="getClassName(selectedClassId)"></span></span>
+                    </h3>
+                    <div class="flex items-center space-x-2">
+                        <button @click="runConflictAudit()" class="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 px-3 py-1.5 rounded-lg text-xs font-semibold transition flex items-center space-x-1.5">
+                            <i class="fa-solid fa-shield-halved"></i>
+                            <span>ตรวจสอบคาบซ้ำทั้งโรงเรียน</span>
+                        </button>
+                        <span class="text-xs text-gray-500 font-medium">คาบ 0 - 8</span>
+                    </div>
+                </div>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full border-collapse text-center table-fixed">
+                        <thead>
+                            <tr class="bg-indigo-700 text-white text-xs sm:text-sm font-semibold">
+                                <th class="p-3 border border-indigo-800 w-32">วัน / คาบ</th>
+                                <template x-for="(p, pIndex) in periods" :key="pIndex">
+                                    <th class="p-2 border border-indigo-800 w-32">
+                                        <div x-text="pIndex === 0 ? 'คาบ 0 (โฮมรูม)' : (pIndex === 4 ? 'พักกลางวัน' : 'คาบที่ ' + (pIndex > 4 ? pIndex : pIndex + 1))"></div>
+                                        <div class="text-[10px] font-normal text-indigo-200" x-text="p.time"></div>
+                                    </th>
+                                </template>
+                            </tr>
+                        </thead>
+                        <tbody class="text-xs sm:text-sm">
+                            <template x-for="day in days" :key="day.id">
+                                <tr>
+                                    <td class="p-3 font-bold bg-gray-100 border border-gray-200 text-gray-700 h-28 align-middle" x-text="day.name"></td>
+                                    <template x-for="(p, pIndex) in periods" :key="pIndex">
+                                        <td class="p-2 border border-gray-200 h-28 align-top relative transition hover:bg-indigo-50/30"
+                                            @dragover.prevent
+                                            @drop="onDropSubject(day.id, pIndex)"
+                                            @click="handleCellClick(day.id, pIndex)">
+                                            
+                                            <!-- Lunch break special slot -->
+                                            <template x-if="pIndex === 4">
+                                                <div class="h-full flex items-center justify-center bg-gray-100/70 text-gray-400 font-medium text-xs">
+                                                    พักกลางวัน
+                                                </div>
+                                            </template>
+
+                                            <!-- Normal Period Slot -->
+                                            <template x-if="pIndex !== 4">
+                                                <div class="h-full flex flex-col justify-between">
+                                                    <template x-if="getTimetableCell(selectedClassId, day.id, pIndex)">
+                                                        <div class="p-2 rounded-lg shadow-xs text-left relative group border h-full flex flex-col justify-between overflow-hidden"
+                                                             :style="getTeacherGroupStyle(getTimetableCell(selectedClassId, day.id, pIndex).teacherId)">
+                                                            
+                                                            <div>
+                                                                <div class="font-bold text-xs line-clamp-2 leading-tight" x-text="getSubjectName(getTimetableCell(selectedClassId, day.id, pIndex).subjectId)"></div>
+                                                                <div class="text-[11px] opacity-90 truncate mt-0.5" x-text="getSubjectCode(getTimetableCell(selectedClassId, day.id, pIndex).subjectId)"></div>
+                                                            </div>
+                                                            <div class="text-[10px] font-semibold opacity-90 truncate mt-1 bg-white/70 px-1.5 py-0.5 rounded shadow-xs" x-text="getTeacherName(getTimetableCell(selectedClassId, day.id, pIndex).teacherId)"></div>
+                                                            
+                                                            <!-- Delete Cell Button -->
+                                                            <button @click.stop="removeTimetableCell(selectedClassId, day.id, pIndex)" class="absolute top-1 right-1 bg-rose-600 hover:bg-rose-700 text-white w-5 h-5 rounded-full flex items-center justify-center text-[10px] shadow opacity-0 group-hover:opacity-100 transition">
+                                                                <i class="fa-solid fa-xmark"></i>
+                                                            </button>
+                                                        </div>
+                                                    </template>
+
+                                                    <template x-if="!getTimetableCell(selectedClassId, day.id, pIndex)">
+                                                        <div class="h-full flex flex-col items-center justify-center text-gray-300 hover:text-indigo-400 border-2 border-dashed border-transparent hover:border-indigo-300 rounded-lg transition">
+                                                            <i class="fa-solid fa-plus text-sm mb-1"></i>
+                                                            <span class="text-[10px]">จัดคาบเรียน</span>
+                                                        </div>
+                                                    </template>
+                                                </div>
+                                            </template>
+                                        </td>
+                                    </template>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ================= TAB 2: TEACHER TIMETABLE ================= -->
+        <div x-show="currentTab === 'teachers'" class="space-y-6" style="display: none;">
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-wrap items-center justify-between gap-4 no-print">
+                <div class="flex items-center space-x-3">
+                    <label class="font-semibold text-gray-700">เลือกครูผู้สอน:</label>
+                    <select x-model="selectedTeacherId" class="border border-gray-300 rounded-lg px-4 py-2 font-medium text-indigo-700 bg-indigo-50/50 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        <template x-for="t in teachers" :key="t.id">
+                            <option :value="t.id" x-text="t.name + ' (' + t.group + ')'"></option>
+                        </template>
+                    </select>
+                </div>
+                <div class="text-sm font-semibold text-indigo-700 bg-indigo-50 px-4 py-2 rounded-lg border border-indigo-100">
+                    ภาระงานสอนรวม: <span class="text-base font-bold" x-text="getTeacherTotalHours(selectedTeacherId)"></span> คาบ / สัปดาห์
+                </div>
+            </div>
+
+            <!-- Teacher Timetable Table -->
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <div class="p-4 bg-gray-50 border-b border-gray-200">
+                    <h3 class="font-bold text-gray-800 text-base flex items-center space-x-2">
+                        <i class="fa-solid fa-chalkboard-user text-indigo-600"></i>
+                        <span>ตารางสอนส่วนตัว: <span class="text-indigo-600" x-text="getTeacherName(selectedTeacherId)"></span></span>
+                    </h3>
+                </div>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full border-collapse text-center table-fixed">
+                        <thead>
+                            <tr class="bg-indigo-700 text-white text-xs sm:text-sm font-semibold">
+                                <th class="p-3 border border-indigo-800 w-32">วัน / คาบ</th>
+                                <template x-for="(p, pIndex) in periods" :key="pIndex">
+                                    <th class="p-2 border border-indigo-800 w-32">
+                                        <div x-text="pIndex === 0 ? 'คาบ 0 (โฮมรูม)' : (pIndex === 4 ? 'พักกลางวัน' : 'คาบที่ ' + (pIndex > 4 ? pIndex : pIndex + 1))"></div>
+                                        <div class="text-[10px] font-normal text-indigo-200" x-text="p.time"></div>
+                                    </th>
+                                </template>
+                            </tr>
+                        </thead>
+                        <tbody class="text-xs sm:text-sm">
+                            <template x-for="day in days" :key="day.id">
+                                <tr>
+                                    <td class="p-3 font-bold bg-gray-100 border border-gray-200 text-gray-700 h-28 align-middle" x-text="day.name"></td>
+                                    <template x-for="(p, pIndex) in periods" :key="pIndex">
+                                        <td class="p-2 border border-gray-200 h-28 align-top bg-white">
+                                            <template x-if="pIndex === 4">
+                                                <div class="h-full flex items-center justify-center bg-gray-100/70 text-gray-400 font-medium text-xs">
+                                                    พักกลางวัน
+                                                </div>
+                                            </template>
+                                            <template x-if="pIndex !== 4">
+                                                <div class="h-full flex flex-col justify-between">
+                                                    <template x-if="getTeacherCell(selectedTeacherId, day.id, pIndex)">
+                                                        <div class="p-2 rounded-lg border text-left shadow-xs h-full flex flex-col justify-between"
+                                                             :style="getTeacherGroupStyle(selectedTeacherId)">
+                                                            <div>
+                                                                <div class="font-bold text-xs line-clamp-2 leading-tight" x-text="getSubjectName(getTeacherCell(selectedTeacherId, day.id, pIndex).subjectId)"></div>
+                                                                <div class="text-[11px] opacity-80 mt-0.5 truncate" x-text="getSubjectCode(getTeacherCell(selectedTeacherId, day.id, pIndex).subjectId)"></div>
+                                                            </div>
+                                                            <div class="text-[10px] font-semibold mt-1 bg-white/70 px-1.5 py-0.5 rounded border border-black/10 inline-block truncate">
+                                                                ห้อง: <span x-text="getClassName(getTeacherCell(selectedTeacherId, day.id, pIndex).classId)"></span>
+                                                            </div>
+                                                        </div>
+                                                    </template>
+                                                    <template x-if="!getTeacherCell(selectedTeacherId, day.id, pIndex)">
+                                                        <div class="h-full flex items-center justify-center text-gray-300 text-xs font-medium">
+                                                            (ว่าง)
+                                                        </div>
+                                                    </template>
+                                                </div>
+                                            </template>
+                                        </td>
+                                    </template>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ================= TAB 3: SUBSTITUTE SYSTEM ================= -->
+        <div x-show="currentTab === 'substitute'" class="space-y-6" style="display: none;">
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100 space-y-4">
+                <h3 class="font-bold text-gray-800 text-lg flex items-center space-x-2">
+                    <i class="fa-solid fa-user-clock text-indigo-600"></i>
+                    <span>ระบบจัดสอนแทน (ค้นหาครูว่าง)</span>
+                </h3>
+
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">วันที่ลา:</label>
+                        <input type="date" x-model="subForm.date" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">ครูผู้ลา:</label>
+                        <select x-model="subForm.absentTeacherId" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                            <option value="">-- เลือกครูผู้ลา --</option>
+                            <template x-for="t in teachers" :key="t.id">
+                                <option :value="t.id" x-text="t.name"></option>
+                            </template>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">คาบเรียนที่สอนแทน:</label>
+                        <select x-model.number="subForm.periodIndex" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                            <template x-for="(p, idx) in periods" :key="idx">
+                                <template x-if="idx !== 4">
+                                    <option :value="idx" x-text="(idx === 0 ? 'คาบ 0 (โฮมรูม)' : 'คาบที่ ' + (idx > 4 ? idx : idx + 1)) + ' (' + p.time + ')'"></option>
+                                </template>
+                            </template>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Available Teachers for Substitution -->
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <div class="p-4 bg-gray-50 border-b border-gray-200">
+                    <h4 class="font-bold text-gray-800">รายชื่อครูว่างในคาบดังกล่าว (เรียงตามภาระงานน้อยไปมาก):</h4>
+                </div>
+                <div class="divide-y divide-gray-200">
+                    <template x-for="t in getAvailableTeachers(subForm.periodIndex)" :key="t.id">
+                        <div class="p-4 flex items-center justify-between hover:bg-gray-50 transition">
+                            <div class="flex items-center space-x-3">
+                                <div class="bg-indigo-100 text-indigo-700 w-10 h-10 rounded-full flex items-center justify-center font-bold">
+                                    <i class="fa-solid fa-user-check"></i>
+                                </div>
+                                <div>
+                                    <h5 class="font-bold text-gray-800" x-text="t.name"></h5>
+                                    <p class="text-xs text-gray-500">กลุ่มสาระ: <span x-text="t.group"></span> | ภาระงานรวม: <span class="font-semibold text-indigo-600" x-text="getTeacherTotalHours(t.id)"></span> คาบ/สัปดาห์</p>
+                                </div>
+                            </div>
+                            <button @click="assignSubstitute(t.id)" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm">
+                                มอบหมายสอนแทน
+                            </button>
+                        </div>
+                    </template>
+                    <template x-if="getAvailableTeachers(subForm.periodIndex).length === 0">
+                        <div class="p-8 text-center text-gray-400">ไม่มีครูว่างในคาบเวลานี้</div>
+                    </template>
+                </div>
+            </div>
+        </div>
+
+        <!-- ================= TAB 4: SUBJECT STRUCTURE ================= -->
+        <div x-show="currentTab === 'subjects'" class="space-y-6" style="display: none;">
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-wrap items-center justify-between gap-4">
+                <div class="flex items-center space-x-3">
+                    <label class="font-semibold text-gray-700">เลือกชั้นเรียน:</label>
+                    <select x-model="subjectFilterClassId" class="border border-gray-300 rounded-lg px-4 py-2 font-medium text-indigo-700 bg-indigo-50/50 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        <template x-for="cls in classes" :key="cls.id">
+                            <option :value="cls.id" x-text="cls.name"></option>
+                        </template>
+                    </select>
+                </div>
+
+                <div class="flex items-center space-x-3">
+                    <button @click="openClassBatchEditModal()" class="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm flex items-center space-x-2">
+                        <i class="fa-solid fa-pen-to-square"></i>
+                        <span>แก้ไขรายวิชาทั้งชั้น</span>
+                    </button>
+                    <button @click="openSubjectModal('add')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm flex items-center space-x-2">
+                        <i class="fa-solid fa-plus"></i>
+                        <span>เพิ่มรายวิชา</span>
+                    </button>
+                    <button @click="openCopyModal()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm flex items-center space-x-2">
+                        <i class="fa-solid fa-copy"></i>
+                        <span>คัดลอกรายวิชาไปชั้นอื่น</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Subject Tables grouped by Learning Area -->
+            <div class="space-y-6">
+                <template x-for="area in learningAreas" :key="area">
+                    <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                        <div class="p-3 bg-indigo-50 border-b border-indigo-100 text-indigo-900 font-bold flex justify-between items-center">
+                            <span x-text="area"></span>
+                            <span class="text-xs bg-indigo-200 text-indigo-800 px-2.5 py-0.5 rounded-full" x-text="getSubjectsByArea(subjectFilterClassId, area).length + ' วิชา'"></span>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left border-collapse text-sm">
+                                <thead>
+                                    <tr class="bg-gray-50 border-b text-gray-600 text-xs">
+                                        <th class="p-3 w-28">รหัสวิชา</th>
+                                        <th class="p-3">ชื่อรายวิชา</th>
+                                        <th class="p-3">ครูผู้สอนประจำวิชา</th>
+                                        <th class="p-3 text-center w-24">หน่วยกิต</th>
+                                        <th class="p-3 text-center w-28">ชม./สัปดาห์</th>
+                                        <th class="p-3 text-center w-24">ประเภท</th>
+                                        <th class="p-3 text-center w-36">จัดการ / เลื่อนอันดับ</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <template x-for="(subj, sIdx) in getSubjectsByArea(subjectFilterClassId, area)" :key="subj.id">
+                                        <tr class="border-b hover:bg-gray-50 transition">
+                                            <td class="p-3 font-bold text-indigo-700" x-text="subj.code"></td>
+                                            <td class="p-3 font-medium text-gray-800" x-text="subj.name"></td>
+                                            <td class="p-3 text-indigo-900 font-semibold" x-text="getTeacherName(subj.teacherId) || 'ยังไม่ระบุครู'"></td>
+                                            <td class="p-3 text-center" x-text="subj.credit"></td>
+                                            <td class="p-3 text-center font-semibold text-indigo-600" x-text="subj.hours"></td>
+                                            <td class="p-3 text-center">
+                                                <span class="px-2 py-0.5 rounded text-xs font-medium" :class="subj.type === 'พื้นฐาน' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'bg-purple-50 text-purple-700 border border-purple-200'" x-text="subj.type"></span>
+                                            </td>
+                                            <td class="p-3 text-center space-x-1 whitespace-nowrap">
+                                                <button @click="moveSubject(subjectFilterClassId, area, sIdx, -1)" class="p-1.5 text-gray-600 hover:text-indigo-600" title="เลื่อนขึ้น"><i class="fa-solid fa-arrow-up"></i></button>
+                                                <button @click="moveSubject(subjectFilterClassId, area, sIdx, 1)" class="p-1.5 text-gray-600 hover:text-indigo-600" title="เลื่อนลง"><i class="fa-solid fa-arrow-down"></i></button>
+                                                <button @click="openSubjectModal('edit', subj)" class="text-amber-600 hover:text-amber-800 p-1.5" title="แก้ไข"><i class="fa-solid fa-pen-to-square"></i></button>
+                                                <button @click="deleteSubject(subj.id)" class="text-rose-600 hover:text-rose-800 p-1.5" title="ลบ"><i class="fa-solid fa-trash"></i></button>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                    <template x-if="getSubjectsByArea(subjectFilterClassId, area).length === 0">
+                                        <tr>
+                                            <td colspan="7" class="p-4 text-center text-gray-400 text-xs">ไม่มีรายวิชาในกลุ่มสาระนี้</td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </div>
+
+        <!-- ================= TAB 5: SCHOOL & STAFF SETTINGS ================= -->
+        <div x-show="currentTab === 'settings'" class="space-y-6" style="display: none;">
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100 space-y-4">
+                <h3 class="font-bold text-gray-800 text-lg flex items-center space-x-2">
+                    <i class="fa-solid fa-school text-indigo-600"></i>
+                    <span>ตั้งค่าข้อมูลสถานศึกษาและผู้ลงนามเอกสาร</span>
+                </h3>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">ชื่อสถานศึกษา:</label>
+                        <input type="text" x-model="schoolConfig.schoolName" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                    </div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">ปีการศึกษา:</label>
+                            <input type="text" x-model="schoolConfig.academicYear" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">ภาคเรียนที่:</label>
+                            <input type="text" x-model="schoolConfig.semester" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">หัวหน้างานวิชาการ (ลงนาม):</label>
+                        <input type="text" x-model="schoolConfig.academicHead" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">ผู้อำนวยการสถานศึกษา (ลงนาม):</label>
+                        <input type="text" x-model="schoolConfig.director" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Classes Management -->
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100 space-y-4">
+                <div class="flex justify-between items-center">
+                    <h3 class="font-bold text-gray-800 text-base flex items-center space-x-2">
+                        <i class="fa-solid fa-door-open text-indigo-600"></i>
+                        <span>จัดการห้องเรียนและครูประจำชั้น</span>
+                    </h3>
+                    <button @click="addClass()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition shadow-sm">
+                        <i class="fa-solid fa-plus mr-1"></i> เพิ่มห้องเรียน
+                    </button>
+                </div>
+                <div class="divide-y divide-gray-200">
+                    <template x-for="(cls, index) in classes" :key="cls.id">
+                        <div class="py-3 flex flex-wrap items-center justify-between gap-3 bg-gray-50/50 p-3 rounded-lg border border-gray-100 mb-2">
+                            <div class="flex items-center space-x-3">
+                                <span class="font-bold text-gray-800 w-20" x-text="cls.name"></span>
+                            </div>
+                            <div class="flex items-center space-x-3">
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" x-model="cls.active" @change="syncToCloud()" class="sr-only peer">
+                                    <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                                </label>
+                                <div class="space-x-1">
+                                    <button @click="moveClass(index, -1)" class="p-1.5 text-gray-600 hover:text-indigo-600"><i class="fa-solid fa-arrow-up"></i></button>
+                                    <button @click="moveClass(index, 1)" class="p-1.5 text-gray-600 hover:text-indigo-600"><i class="fa-solid fa-arrow-down"></i></button>
+                                    <button @click="deleteClass(cls.id)" class="p-1.5 text-rose-600 hover:text-rose-800"><i class="fa-solid fa-trash"></i></button>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </div>
+
+            <!-- Teachers Management -->
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100 space-y-4">
+                <div class="flex justify-between items-center">
+                    <h3 class="font-bold text-gray-800 text-base flex items-center space-x-2">
+                        <i class="fa-solid fa-users text-indigo-600"></i>
+                        <span>จัดการรายชื่อครูผู้สอนและสีประจำตัว</span>
+                    </h3>
+                    <button @click="openTeacherModal('add')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition shadow-sm">
+                        <i class="fa-solid fa-plus mr-1"></i> เพิ่มครูผู้สอน
+                    </button>
+                </div>
+                <div class="divide-y divide-gray-200 max-h-96 overflow-y-auto">
+                    <template x-for="(t, index) in teachers" :key="t.id">
+                        <div class="py-3 flex items-center justify-between">
+                            <div class="flex items-center space-x-3">
+                                <div class="w-8 h-8 rounded-lg border border-gray-300 shadow-xs shrink-0" :style="'background-color: ' + (t.color || '#eff6ff')"></div>
+                                <div>
+                                    <h5 class="font-bold text-gray-800 text-sm" x-text="t.name"></h5>
+                                    <p class="text-xs text-gray-500">กลุ่มสาระ: <span x-text="t.group"></span> | ตำแหน่ง: <span x-text="t.position"></span></p>
+                                </div>
+                            </div>
+                            <div class="space-x-1 flex items-center">
+                                <button @click="moveTeacher(index, -1)" class="p-1.5 text-gray-600 hover:text-indigo-600"><i class="fa-solid fa-arrow-up"></i></button>
+                                <button @click="moveTeacher(index, 1)" class="p-1.5 text-gray-600 hover:text-indigo-600"><i class="fa-solid fa-arrow-down"></i></button>
+                                <button @click="openTeacherModal('edit', t)" class="p-1.5 text-amber-600 hover:text-amber-800"><i class="fa-solid fa-pen-to-square"></i></button>
+                                <button @click="deleteTeacher(t.id)" class="p-1.5 text-rose-600 hover:text-rose-800"><i class="fa-solid fa-trash"></i></button>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </div>
+        </div>
+
+        <!-- ================= TAB 6: A4 PRINT LAYOUT ================= -->
+        <div x-show="currentTab === 'print'" class="space-y-6" style="display: none;">
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-wrap items-center justify-between gap-4 no-print">
+                <div class="flex items-center space-x-4">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">รูปแบบการพิมพ์:</label>
+                        <select x-model="printMode" class="border border-gray-300 rounded-lg px-3 py-2 text-sm font-medium text-indigo-700 bg-indigo-50/50">
+                            <option value="class">ตารางสอนชั้นเรียน</option>
+                            <option value="teacher">ตารางสอนครูผู้สอน</option>
+                        </select>
+                    </div>
+                    <template x-if="printMode === 'class'">
+                        <div>
+                            <label class="block text-xs font-medium text-gray-500 mb-1">เลือกห้องเรียน:</label>
+                            <select x-model="printTargetClassId" class="border border-gray-300 rounded-lg px-3 py-2 text-sm font-medium text-indigo-700 bg-indigo-50/50">
+                                <template x-for="cls in classes" :key="cls.id">
+                                    <option :value="cls.id" x-text="cls.name"></option>
+                                </template>
+                            </select>
+                        </div>
+                    </template>
+                    <template x-if="printMode === 'teacher'">
+                        <div>
+                            <label class="block text-xs font-medium text-gray-500 mb-1">เลือกครูผู้สอน:</label>
+                            <select x-model="printTargetTeacherId" class="border border-gray-300 rounded-lg px-3 py-2 text-sm font-medium text-indigo-700 bg-indigo-50/50">
+                                <template x-for="t in teachers" :key="t.id">
+                                    <option :value="t.id" x-text="t.name"></option>
+                                </template>
+                            </select>
+                        </div>
+                    </template>
+                </div>
+
+                <button onclick="window.print()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-lg text-sm font-medium transition shadow flex items-center space-x-2">
+                    <i class="fa-solid fa-print"></i>
+                    <span>พิมพ์ตารางสอน / บันทึก PDF</span>
+                </button>
+            </div>
+
+            <!-- Print Preview Container -->
+            <div class="print-container bg-white p-8 rounded-xl shadow-sm border border-gray-200 max-w-[297mm] mx-auto text-gray-900 space-y-6">
+                <div class="text-center space-y-1">
+                    <h2 class="text-xl font-bold" x-text="schoolConfig.schoolName"></h2>
+                    <h3 class="text-base font-semibold" x-text="printMode === 'class' ? 'ตารางสอนประจำห้องเรียน ' + getClassName(printTargetClassId) : 'ตารางสอนส่วนตัว ' + getTeacherName(printTargetTeacherId)"></h3>
+                    <p class="text-xs text-gray-600">ปีการศึกษา <span x-text="schoolConfig.academicYear"></span> / ภาคเรียนที่ <span x-text="schoolConfig.semester"></span></p>
+                </div>
+
+                <table class="w-full border-collapse border border-gray-800 text-center text-xs table-fixed">
+                    <thead>
+                        <tr class="bg-gray-100 text-gray-900 font-bold">
+                            <th class="p-2 border border-gray-800 w-32">วัน / คาบ</th>
+                            <template x-for="(p, pIndex) in periods" :key="pIndex">
+                                <th class="p-2 border border-gray-800 w-32">
+                                    <div x-text="pIndex === 0 ? 'คาบ 0' : (pIndex === 4 ? 'พักกลางวัน' : 'คาบที่ ' + (pIndex > 4 ? pIndex : pIndex + 1))"></div>
+                                    <div class="text-[9px] font-normal text-gray-600" x-text="p.time"></div>
+                                </th>
+                            </template>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="day in days" :key="day.id">
+                            <tr>
+                                <td class="p-2 font-bold bg-gray-50 border border-gray-800 h-20 align-middle" x-text="day.name"></td>
+                                <template x-for="(p, pIndex) in periods" :key="pIndex">
+                                    <td class="p-1 border border-gray-800 h-20 align-top">
+                                        <template x-if="pIndex === 4">
+                                            <div class="h-full flex items-center justify-center text-gray-400 font-medium text-[10px]">
+                                                พักกลางวัน
+                                            </div>
+                                        </template>
+                                        <template x-if="pIndex !== 4 && printMode === 'class'">
+                                            <div class="h-full flex flex-col justify-between">
+                                                <template x-if="getTimetableCell(printTargetClassId, day.id, pIndex)">
+                                                    <div class="p-1 text-left rounded h-full flex flex-col justify-between" :style="getTeacherGroupStyle(getTimetableCell(printTargetClassId, day.id, pIndex).teacherId)">
+                                                        <div>
+                                                            <div class="font-bold text-[11px] line-clamp-2 leading-tight" x-text="getSubjectName(getTimetableCell(printTargetClassId, day.id, pIndex).subjectId)"></div>
+                                                            <div class="text-[9px] opacity-80 truncate" x-text="getSubjectCode(getTimetableCell(printTargetClassId, day.id, pIndex).subjectId)"></div>
+                                                        </div>
+                                                        <div class="text-[9px] font-semibold mt-0.5 bg-white/70 px-1 py-0.5 rounded truncate" x-text="getTeacherName(getTimetableCell(printTargetClassId, day.id, pIndex).teacherId)"></div>
+                                                    </div>
+                                                </template>
+                                            </div>
+                                        </template>
+                                        <template x-if="pIndex !== 4 && printMode === 'teacher'">
+                                            <div class="h-full flex flex-col justify-between">
+                                                <template x-if="getTeacherCell(printTargetTeacherId, day.id, pIndex)">
+                                                    <div class="p-1 text-left rounded h-full flex flex-col justify-between" :style="getTeacherGroupStyle(printTargetTeacherId)">
+                                                        <div>
+                                                            <div class="font-bold text-[11px] line-clamp-2 leading-tight" x-text="getSubjectName(getTeacherCell(printTargetTeacherId, day.id, pIndex).subjectId)"></div>
+                                                            <div class="text-[9px] opacity-80 truncate" x-text="getSubjectCode(getTeacherCell(printTargetTeacherId, day.id, pIndex).subjectId)"></div>
+                                                        </div>
+                                                        <div class="text-[9px] font-medium mt-1 bg-white/70 px-1 py-0.5 rounded truncate" x-text="'ห้อง: ' + getClassName(getTeacherCell(printTargetTeacherId, day.id, pIndex).classId)"></div>
+                                                    </div>
+                                                </template>
+                                            </div>
+                                        </template>
+                                    </td>
+                                </template>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+
+                <div class="grid grid-cols-3 gap-8 pt-8 text-center text-xs">
+                    <div class="space-y-12">
+                        <p>ลงชื่อ............................................................<br>(............................................................)<br>ครูประจำชั้น / ครูผู้สอน</p>
+                    </div>
+                    <div class="space-y-12">
+                        <p>ลงชื่อ............................................................<br>(<span x-text="schoolConfig.academicHead"></span>)<br>หัวหน้างานวิชาการ</p>
+                    </div>
+                    <div class="space-y-12">
+                        <p>ลงชื่อ............................................................<br>(<span x-text="schoolConfig.director"></span>)<br>ผู้อำนวยการสถานศึกษา</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- ================= MODALS ================= -->
+
+    <!-- Conflict Audit Report Modal -->
+    <div x-show="showConflictAuditModal" class="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50" style="display: none;">
+        <div class="bg-white rounded-2xl shadow-xl max-w-xl w-full p-6 space-y-4 max-h-[80vh] flex flex-col">
+            <h3 class="font-bold text-gray-800 text-lg border-b pb-2 flex items-center space-x-2">
+                <i class="fa-solid fa-triangle-exclamation text-amber-500"></i>
+                <span>รายงานผลการตรวจสอบคาบสอนซ้ำซ้อนทั้งโรงเรียน</span>
+            </h3>
+
+            <div class="overflow-y-auto flex-grow space-y-2.5 pr-1">
+                <template x-for="report in auditReportList" :key="report.id">
+                    <div class="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-900 text-xs flex items-start space-x-2">
+                        <i class="fa-solid fa-circle-exclamation text-rose-600 mt-0.5"></i>
+                        <span x-text="report.message" class="font-medium"></span>
+                    </div>
+                </template>
+                <template x-if="auditReportList.length === 0">
+                    <div class="py-12 text-center text-emerald-600 space-y-2">
+                        <i class="fa-solid fa-circle-check text-4xl"></i>
+                        <p class="font-bold text-base">ยอดเยี่ยม! ไม่พบปัญหาคาบสอนซ้ำซ้อนหรือครูสอนทับซ้อนกันในระบบ</p>
+                    </div>
+                </template>
+            </div>
+
+            <div class="flex justify-end pt-4 border-t">
+                <button @click="showConflictAuditModal = false" class="bg-gray-700 hover:bg-gray-800 text-white px-4 py-2 rounded-lg text-sm font-medium transition">ปิดหน้าต่าง</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Assign Timetable Cell Modal -->
+    <div x-show="showAssignModal" class="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50" style="display: none;">
+        <div class="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4">
+            <h3 class="font-bold text-gray-800 text-lg border-b pb-2">จัดคาบเรียน</h3>
+            <p class="text-xs text-indigo-600 font-medium" x-text="assignModalInfoText()"></p>
+
+            <div class="space-y-3">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">เลือกรายวิชา:</label>
+                    <select x-model="assignForm.subjectId" @change="onAssignSubjectChange($event.target.value)" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                        <option value="">-- เลือกรายวิชา --</option>
+                        <template x-for="subj in subjects.filter(s => s.classId === selectedClassId)" :key="subj.id">
+                            <option :value="subj.id" x-text="subj.code + ' - ' + subj.name"></option>
+                        </template>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">เลือกครูผู้สอน:</label>
+                    <select x-model="assignForm.teacherId" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-gray-50">
+                        <option value="">-- เลือกครูผู้สอน --</option>
+                        <template x-for="t in teachers" :key="t.id">
+                            <option :value="t.id" x-text="t.name + ' (' + t.group + ')'"></option>
+                        </template>
+                    </select>
+                </div>
+            </div>
+
+            <div class="flex justify-end space-x-2 pt-4 border-t">
+                <button @click="showAssignModal = false" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium transition">ยกเลิก</button>
+                <button @click="saveAssignCell()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm">บันทึกคาบเรียน</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Subject Add/Edit Modal -->
+    <div x-show="showSubjectModal" class="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50" style="display: none;">
+        <div class="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4">
+            <h3 class="font-bold text-gray-800 text-lg border-b pb-2" x-text="subjectModalMode === 'add' ? 'เพิ่มรายวิชาใหม่' : 'แก้ไขรายวิชา'"></h3>
+            
+            <div class="space-y-3">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">รหัสวิชา:</label>
+                    <input type="text" x-model="subjectForm.code" placeholder="เช่น ท21101" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">ชื่อรายวิชา:</label>
+                    <input type="text" x-model="subjectForm.name" placeholder="เช่น ภาษาไทย 1" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">กลุ่มสาระการเรียนรู้:</label>
+                    <select x-model="subjectForm.area" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                        <template x-for="area in learningAreas" :key="area">
+                            <option :value="area" x-text="area"></option>
+                        </template>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">ครูผู้สอนประจำวิชา:</label>
+                    <select x-model="subjectForm.teacherId" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                        <option value="">-- เลือกครูผู้สอนประจำวิชา --</option>
+                        <template x-for="t in teachers" :key="t.id">
+                            <option :value="t.id" x-text="t.name + ' (' + t.group + ')'"></option>
+                        </template>
+                    </select>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">หน่วยกิต:</label>
+                        <input type="number" step="0.5" x-model.number="subjectForm.credit" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">ชม./สัปดาห์:</label>
+                        <input type="number" x-model.number="subjectForm.hours" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">ประเภทวิชา:</label>
+                    <select x-model="subjectForm.type" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                        <option value="พื้นฐาน">พื้นฐาน</option>
+                        <option value="เพิ่มเติม">เพิ่มเติม</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="flex justify-end space-x-2 pt-4 border-t">
+                <button @click="showSubjectModal = false" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium transition">ยกเลิก</button>
+                <button @click="saveSubject()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm">บันทึกข้อมูล</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Teacher Add/Edit Modal -->
+    <div x-show="showTeacherModal" class="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50" style="display: none;">
+        <div class="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4">
+            <h3 class="font-bold text-gray-800 text-lg border-b pb-2" x-text="teacherModalMode === 'add' ? 'เพิ่มครูผู้สอนใหม่' : 'แก้ไขข้อมูลครู'"></h3>
+            
+            <div class="space-y-3">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">ชื่อ - นามสกุล:</label>
+                    <input type="text" x-model="teacherForm.name" placeholder="เช่น นายสมศักดิ์ รักเรียน" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">กลุ่มสาระการเรียนรู้หลัก:</label>
+                    <select x-model="teacherForm.group" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                        <template x-for="area in learningAreas" :key="area">
+                            <option :value="area" x-text="area"></option>
+                        </template>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">ตำแหน่ง:</label>
+                    <input type="text" x-model="teacherForm.position" placeholder="เช่น ครูชำนาญการ" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">สีพื้นหลังในตารางสอน (สีสดใส):</label>
+                    <div class="flex items-center space-x-3">
+                        <input type="color" x-model="teacherForm.color" class="w-12 h-10 border border-gray-300 rounded-lg cursor-pointer p-1 bg-white">
+                        <span class="text-xs text-gray-500" x-text="teacherForm.color"></span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex justify-end space-x-2 pt-4 border-t">
+                <button @click="showTeacherModal = false" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium transition">ยกเลิก</button>
+                <button @click="saveTeacher()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm">บันทึกข้อมูล</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Data Backup & Sync Modal -->
+    <div x-show="showDataModal" class="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50" style="display: none;">
+        <div class="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4">
+            <h3 class="font-bold text-gray-800 text-lg border-b pb-2">จัดการข้อมูลสำรอง (Backup & Restore)</h3>
+            
+            <p class="text-xs text-gray-600">ระบบเชื่อมต่อกับ Google Sheets อัตโนมัติทุกครั้งที่มีการเปลี่ยนแปลง คุณสามารถสำรองข้อมูลเก็บไว้เป็นไฟล์ JSON ได้ที่นี่</p>
+
+            <div class="space-y-3 pt-2">
+                <button @click="exportDataJSON()" class="w-full bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 py-2.5 rounded-lg text-sm font-medium transition flex items-center justify-center space-x-2">
+                    <i class="fa-solid fa-download"></i>
+                    <span>ดาวน์โหลดไฟล์สำรอง (JSON)</span>
+                </button>
+
+                <label class="w-full bg-gray-50 hover:bg-gray-100 text-gray-700 border border-gray-300 py-2.5 rounded-lg text-sm font-medium transition flex items-center justify-center space-x-2 cursor-pointer">
+                    <i class="fa-solid fa-upload"></i>
+                    <span>นำเข้าข้อมูลจากไฟล์ (JSON)</span>
+                    <input type="file" @change="importDataJSON($event)" accept=".json" class="hidden">
+                </label>
+            </div>
+
+            <div class="flex justify-end pt-4 border-t">
+                <button @click="showDataModal = false" class="bg-gray-700 hover:bg-gray-800 text-white px-4 py-2 rounded-lg text-sm font-medium transition">ปิดหน้าต่าง</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript Application Logic -->
+    <script>
+        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxfMuljVC1gewsjtLbbIUzx9Rm7Myy75Xo12d5ngdiHPa9gKFTkrmvpIwEUFzVa3CiA/exec";
+
+        function appData() {
+            return {
+                isAuthenticated: false,
+                enteredPin: '',
+                showPin: false,
+                loginError: false,
+
+                authenticate() {
+                    if (this.enteredPin === '123456') {
+                        this.isAuthenticated = true;
+                        this.loginError = false;
+                    } else {
+                        this.loginError = true;
+                        this.enteredPin = '';
+                    }
+                },
+
+                currentTab: 'timetable',
+                syncStatus: 'synced',
+                syncMessage: 'ข้อมูลซิงค์แล้ว',
+                isSyncing: false,
+
+                schoolConfig: {
+                    schoolName: 'โรงเรียนวัดคลองตาล(ศรีรัตนประชานุกูล)',
+                    academicYear: '2569',
+                    semester: '2',
+                    academicHead: 'นายพัฒน์ปกรณ์ กีรตินนปกรณ์',
+                    director: 'นางสาวพชรกมล คำไวย์'
+                },
+
+                learningAreas: [
+                    'ภาษาไทย', 'คณิตศาสตร์', 'วิทยาศาสตร์และเทคโนโลยี',
+                    'สังคมศึกษา ศาสนา และวัฒนธรรม', 'สุขศึกษาและพลศึกษา',
+                    'การงานอาชีพ', 'ศิลปะ', 'ภาษาต่างประเทศ', 'กิจกรรมพัฒนาผู้เรียน', 'ปฐมวัย'
+                ],
+
+                days: [
+                    { id: 'mon', name: 'วันจันทร์' },
+                    { id: 'tue', name: 'วันอังคาร' },
+                    { id: 'wed', name: 'วันพุธ' },
+                    { id: 'thu', name: 'วันพฤหัสบดี' },
+                    { id: 'fri', name: 'วันศุกร์' }
+                ],
+                periods: [
+                    { time: '08:20 - 08:30' },
+                    { time: '08:30 - 09:30' },
+                    { time: '09:30 - 10:30' },
+                    { time: '10:30 - 11:30' },
+                    { time: '11:30 - 12:30 (พักกลางวัน)' },
+                    { time: '12:30 - 13:30' },
+                    { time: '13:30 - 14:30' },
+                    { time: '14:30 - 15:30' },
+                    { time: '15:30 - 16:30' }
+                ],
+
+                classes: [],
+                teachers: [],
+                subjects: [],
+                timetable: {},
+                substituteLogs: [],
+
+                selectedClassId: '',
+                selectedTeacherId: '',
+                subjectFilterClassId: '',
+                printMode: 'class',
+                printTargetClassId: '',
+                printTargetTeacherId: '',
+
+                draggedSubjectId: null,
+                selectedSubjectForQuickDrop: null,
+
+                showAssignModal: false,
+                assignForm: { dayId: '', periodIndex: null, subjectId: '', teacherId: '' },
+
+                showSubjectModal: false,
+                subjectModalMode: 'add',
+                subjectForm: { id: '', classId: '', code: '', name: '', area: 'ภาษาไทย', credit: 1.0, hours: 2, type: 'พื้นฐาน' },
+
+                showTeacherModal: false,
+                teacherModalMode: 'add',
+                teacherForm: { id: '', name: '', group: 'ภาษาไทย', position: 'ครู', color: '#bfdbfe' },
+
+                showDataModal: false,
+                showConflictAuditModal: false,
+                auditReportList: [],
+
+                subForm: { date: new Date().toISOString().slice(0, 10), absentTeacherId: '', periodIndex: 1 },
+
+                initSystem() {
+                    this.fetchFromCloud();
+                },
+
+                getAllSystemConflicts() {
+                    let errs = [];
+                    let teacherSlots = {}; 
+                    
+                    for (let key in this.timetable) {
+                        let cell = this.timetable[key];
+                        if (!cell || !cell.teacherId) continue;
+                        let parts = key.split('_'); 
+                        let periodIndex = parts.pop();
+                        let dayId = parts.pop();
+                        let classId = parts.join('_');
+
+                        let classObj = this.classes.find(c => c.id === classId);
+                        if (!classObj) continue;
+
+                        let slotKey = `${cell.teacherId}_${dayId}_${periodIndex}`;
+                        let className = classObj.name;
+
+                        if (!teacherSlots[slotKey]) {
+                            teacherSlots[slotKey] = [];
+                        }
+                        if (!teacherSlots[slotKey].some(item => item.classId === classId)) {
+                            teacherSlots[slotKey].push({ classId, className });
+                        }
+                    }
+
+                    for (let slotKey in teacherSlots) {
+                        let assignments = teacherSlots[slotKey];
+                        if (assignments.length > 1) {
+                            let parts = slotKey.split('_');
+                            let periodIndex = parts.pop();
+                            let dayId = parts.pop();
+                            let teacherId = parts.join('_');
+
+                            let dayName = this.days.find(d => d.id === dayId)?.name || '';
+                            let pIdx = parseInt(periodIndex);
+                            let displayPeriod = pIdx === 0 ? 'คาบ 0 (โฮมรูม)' : (pIdx > 4 ? pIdx : pIdx + 1);
+                            let teacherName = this.getTeacherName(teacherId);
+                            let classNamesStr = assignments.map(a => a.className).filter(Boolean).join(', ');
+                            
+                            if (classNamesStr) {
+                                errs.push(`ครู "${teacherName}" ถูกจัดสอนชนกันใน ${dayName} ${displayPeriod} (สอนห้อง: ${classNamesStr})`);
+                            }
+                        }
+                    }
+                    return errs;
+                },
+
+                runConflictAudit() {
+                    let conflicts = this.getAllSystemConflicts();
+                    let reports = conflicts.map((msg, idx) => ({ id: idx, message: msg }));
+                    this.auditReportList = reports;
+                    this.showConflictAuditModal = true;
+                },
+
+                async syncToCloud() {
+                    this.isSyncing = true;
+                    this.syncStatus = 'syncing';
+                    this.syncMessage = 'กำลังบันทึก...';
+
+                    const payload = {
+                        action: 'saveData',
+                        payload: {
+                            schoolConfig: this.schoolConfig,
+                            classes: this.classes,
+                            teachers: this.teachers,
+                            subjects: this.subjects,
+                            periods: this.periods,
+                            learningAreas: this.learningAreas,
+                            timetable: this.timetable,
+                            substituteLogs: this.substituteLogs
+                        }
+                    };
+
+                    try {
+                        await fetch(GOOGLE_SCRIPT_URL, {
+                            method: 'POST',
+                            mode: 'no-cors',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+                        this.syncStatus = 'synced';
+                        this.syncMessage = 'บันทึกขึ้น Cloud แล้ว';
+                    } catch (e) {
+                        console.error(e);
+                        this.syncStatus = 'error';
+                        this.syncMessage = 'ซิงค์ไม่สำเร็จ';
+                    } finally {
+                        this.isSyncing = false;
+                    }
+                },
+
+                async fetchFromCloud() {
+                    this.isSyncing = true;
+                    this.syncStatus = 'syncing';
+                    this.syncMessage = 'กำลังโหลดข้อมูล...';
+                    try {
+                        const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=getData`);
+                        const text = await res.text();
+                        if (text) {
+                            const resJson = JSON.parse(text);
+                            const data = resJson.data;
+                            if (data && data.schoolConfig) {
+                                this.schoolConfig = data.schoolConfig;
+                                this.classes = data.classes || [];
+                                this.teachers = data.teachers || [];
+                                this.subjects = data.subjects || [];
+                                this.periods = data.periods || this.periods;
+                                this.learningAreas = data.learningAreas || this.learningAreas;
+                                this.timetable = data.timetable || {};
+                                this.substituteLogs = data.substituteLogs || [];
+                            }
+                        }
+                        if (this.classes.length > 0 && !this.selectedClassId) {
+                            this.selectedClassId = this.classes[0].id;
+                            this.subjectFilterClassId = this.classes[0].id;
+                            this.printTargetClassId = this.classes[0].id;
+                        }
+                        if (this.teachers.length > 0 && !this.selectedTeacherId) {
+                            this.selectedTeacherId = this.teachers[0].id;
+                            this.printTargetTeacherId = this.teachers[0].id;
+                        }
+                        this.syncStatus = 'synced';
+                        this.syncMessage = 'ข้อมูลซิงค์แล้ว';
+                    } catch (e) {
+                        this.syncStatus = 'synced';
+                        this.syncMessage = 'โหมดออฟไลน์ (Local)';
+                    } finally {
+                        this.isSyncing = false;
+                    }
+                },
+
+                onDragStartSubject(subj, event) {
+                    this.draggedSubjectId = subj.id;
+                    event.dataTransfer.setData('text/plain', subj.id);
+                },
+                selectSubjectForDrop(subj) {
+                    this.selectedSubjectForQuickDrop = this.selectedSubjectForQuickDrop === subj.id ? null : subj.id;
+                },
+                onDropSubject(dayId, periodIndex) {
+                    if (periodIndex === 4) return;
+                    const subjId = this.draggedSubjectId || this.selectedSubjectForQuickDrop;
+                    if (!subjId) return;
+                    let subj = this.subjects.find(s => s.id === subjId);
+                    let teacherId = subj ? subj.teacherId : (this.teachers[0]?.id || '');
+                    this.assignForm = { dayId, periodIndex, subjectId: subjId, teacherId: teacherId };
+                    this.showAssignModal = true;
+                    this.draggedSubjectId = null;
+                    this.selectedSubjectForQuickDrop = null;
+                },
+                handleCellClick(dayId, periodIndex) {
+                    if (periodIndex === 4) return;
+                    if (this.selectedSubjectForQuickDrop) {
+                        this.onDropSubject(dayId, periodIndex);
+                    } else {
+                        this.openAssignModal(dayId, periodIndex);
+                    }
+                },
+
+                getTimetableCell(classId, dayId, periodIndex) {
+                    return this.timetable[`${classId}_${dayId}_${periodIndex}`] || null;
+                },
+                getTeacherCell(teacherId, dayId, periodIndex) {
+                    for (let key in this.timetable) {
+                        let cell = this.timetable[key];
+                        if (cell && cell.teacherId === teacherId) {
+                            let parts = key.split('_');
+                            let pIdx = parts.pop();
+                            let dId = parts.pop();
+                            let cId = parts.join('_');
+                            if (dId === dayId && parseInt(pIdx) === parseInt(periodIndex)) {
+                                return { classId: cId, subjectId: cell.subjectId };
+                            }
+                        }
+                    }
+                    return null;
+                },
+                openAssignModal(dayId, periodIndex) {
+                    let defaultSubject = this.subjects.find(s => s.classId === this.selectedClassId);
+                    this.assignForm = { 
+                        dayId, 
+                        periodIndex, 
+                        subjectId: defaultSubject ? defaultSubject.id : '', 
+                        teacherId: defaultSubject ? defaultSubject.teacherId : (this.teachers[0]?.id || '') 
+                    };
+                    this.showAssignModal = true;
+                },
+                onAssignSubjectChange(subjectId) {
+                    let subj = this.subjects.find(s => s.id === subjectId);
+                    if (subj && subj.teacherId) {
+                        this.assignForm.teacherId = subj.teacherId;
+                    }
+                },
+                assignModalInfoText() {
+                    let pIdx = parseInt(this.assignForm.periodIndex) || 0;
+                    let displayPeriod = pIdx === 0 ? 'คาบ 0 (โฮมรูม)' : (pIdx > 4 ? pIdx : pIdx + 1);
+                    return `จัดคาบเรียนสำหรับ ${this.getClassName(this.selectedClassId)} - ${this.days.find(d => d.id === this.assignForm.dayId)?.name || ''} คาบที่ ${displayPeriod}`;
+                },
+                saveAssignCell() {
+                    if (!this.assignForm.subjectId || !this.assignForm.teacherId) return;
+                    const key = `${this.selectedClassId}_${this.assignForm.dayId}_${this.assignForm.periodIndex}`;
+                    this.timetable[key] = { subjectId: this.assignForm.subjectId, teacherId: this.assignForm.teacherId };
+                    this.showAssignModal = false;
+                    this.syncToCloud();
+                },
+                removeTimetableCell(classId, dayId, periodIndex) {
+                    const key = `${classId}_${dayId}_${periodIndex}`;
+                    delete this.timetable[key];
+                    this.syncToCloud();
+                },
+                clearClassTimetable(classId) {
+                    if (confirm('คุณต้องการล้างตารางสอนทั้งหมดของชั้นเรียนนี้ใช่หรือไม่?')) {
+                        for (let key in this.timetable) {
+                            if (key.startsWith(classId + '_')) {
+                                delete this.timetable[key];
+                            }
+                        }
+                        this.syncToCloud();
+                    }
+                },
+
+                getClassConflicts(classId) {
+                    let errs = [];
+                    let teacherSlots = {};
+                    for (let key in this.timetable) {
+                        let cell = this.timetable[key];
+                        if (!cell || !cell.teacherId) continue;
+                        let parts = key.split('_'); 
+                        let pIdx = parts.pop();
+                        let dId = parts.pop();
+                        let cId = parts.join('_');
+                        let slotKey = `${cell.teacherId}_${dId}_${pIdx}`;
+                        
+                        if (!teacherSlots[slotKey]) {
+                            teacherSlots[slotKey] = [];
+                        }
+                        if (!teacherSlots[slotKey].includes(cId)) {
+                            teacherSlots[slotKey].push(cId);
+                        }
+                    }
+
+                    for (let key in this.timetable) {
+                        let cell = this.timetable[key];
+                        if (!cell || !cell.teacherId) continue;
+                        let parts = key.split('_');
+                        let pIdx = parts.pop();
+                        let dId = parts.pop();
+                        let cId = parts.join('_');
+
+                        if (cId === classId) {
+                            let slotKey = `${cell.teacherId}_${dId}_${pIdx}`;
+                            if (teacherSlots[slotKey] && teacherSlots[slotKey].length > 1) {
+                                let otherClasses = teacherSlots[slotKey]
+                                    .filter(otherCId => otherCId !== classId)
+                                    .map(otherCId => this.getClassName(otherCId))
+                                    .join(', ');
+                                if (otherClasses) {
+                                    let parsedPIdx = parseInt(pIdx);
+                                    let displayPeriod = parsedPIdx === 0 ? 'คาบ 0 (โฮมรูม)' : (parsedPIdx > 4 ? parsedPIdx : parsedPIdx + 1);
+                                    let dayName = this.days.find(d => d.id === dId)?.name || '';
+                                    let msg = `⚠️ ครู "${this.getTeacherName(cell.teacherId)}" คาบนี้ชนกับห้อง ${otherClasses} (${dayName} ${displayPeriod})`;
+                                    if (!errs.includes(msg)) {
+                                        errs.push(msg);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    return errs;
+                },
+
+                getAssignedSubjectCount(classId, subjectId) {
+                    let count = 0;
+                    for (let key in this.timetable) {
+                        if (key.startsWith(classId + '_')) {
+                            let cell = this.timetable[key];
+                            if (cell && cell.subjectId === subjectId) {
+                                count++;
+                            }
+                        }
+                    }
+                    return count;
+                },
+
+                getTeacherTotalHours(teacherId) {
+                    let count = 0;
+                    for (let key in this.timetable) {
+                        let cell = this.timetable[key];
+                        if (cell && cell.teacherId === teacherId) {
+                            count++;
+                        }
+                    }
+                    return count;
+                },
+
+                getAvailableTeachers(periodIndex) {
+                    return this.teachers.filter(t => {
+                        for (let day of this.days) {
+                            let cell = this.getTeacherCell(t.id, day.id, periodIndex);
+                            if (cell) return false;
+                        }
+                        return true;
+                    }).sort((a, b) => this.getTeacherTotalHours(a.id) - this.getTeacherTotalHours(b.id));
+                },
+
+                assignSubstitute(subId) {
+                    if (!this.subForm.absentTeacherId || !this.subForm.date) {
+                        alert('กรุณากรอกวันที่และเลือกครูผู้ลาให้ครบถ้วน');
+                        return;
+                    }
+                    this.substituteLogs.push({
+                        date: this.subForm.date,
+                        absentId: this.subForm.absentTeacherId,
+                        periodIndex: this.subForm.periodIndex,
+                        subId: subId
+                    });
+                    this.syncToCloud();
+                    alert('บันทึกการมอบหมายสอนแทนสำเร็จเรียบร้อย');
+                },
+
+                getClassName(id) { return this.classes.find(c => c.id === id)?.name || '-'; },
+                getTeacherName(id) { return this.teachers.find(t => t.id === id)?.name || ''; },
+                getSubjectName(id) { return this.subjects.find(s => s.id === id)?.name || '-'; },
+                getSubjectCode(id) { return this.subjects.find(s => s.id === id)?.code || ''; },
+                getTeacherGroupStyle(teacherId) {
+                    let t = this.teachers.find(tr => tr.id === teacherId);
+                    if (!t || !t.color) return 'background-color: #eff6ff; color: #1e3a8a; border-color: #bfdbfe;';
+                    return `background-color: ${t.color}; color: #111827; border-color: rgba(0,0,0,0.15);`;
+                },
+
+                getSubjectsByArea(classId, area) {
+                    return this.subjects.filter(s => s.classId === classId && s.area === area);
+                },
+
+                openSubjectModal(mode, subj = null) {
+                    this.subjectModalMode = mode;
+                    if (mode === 'edit' && subj) {
+                        this.subjectForm = { ...subj };
+                    } else {
+                        this.subjectForm = { 
+                            id: 's_' + Date.now(), 
+                            classId: this.subjectFilterClassId || this.classes[0]?.id || '', 
+                            code: '', 
+                            name: '', 
+                            area: this.learningAreas[0], 
+                            credit: 1.0, 
+                            hours: 2, 
+                            type: 'พื้นฐาน' 
+                        };
+                    }
+                    this.showSubjectModal = true;
+                },
+                saveSubject() {
+                    if (!this.subjectForm.code || !this.subjectForm.name) return;
+                    if (this.subjectModalMode === 'add') {
+                        this.subjects.push({ ...this.subjectForm, classId: this.subjectFilterClassId });
+                    } else {
+                        let idx = this.subjects.findIndex(s => s.id === this.subjectForm.id);
+                        if (idx !== -1) {
+                            this.subjects[idx] = { ...this.subjectForm };
+                        }
+                    }
+                    this.showSubjectModal = false;
+                    this.syncToCloud();
+                },
+                deleteSubject(id) {
+                    if (confirm('คุณต้องการลบรายวิชานี้ใช่หรือไม่?')) {
+                        this.subjects = this.subjects.filter(s => s.id !== id);
+                        this.syncToCloud();
+                    }
+                },
+                moveSubject(classId, area, index, direction) {
+                    let list = this.getSubjectsByArea(classId, area);
+                    let targetItem = list[index];
+                    let globalIndex = this.subjects.findIndex(s => s.id === targetItem.id);
+                    let newIndex = globalIndex + direction;
+                    if (newIndex >= 0 && newIndex < this.subjects.length) {
+                        let temp = this.subjects[globalIndex];
+                        this.subjects[globalIndex] = this.subjects[newIndex];
+                        this.subjects[newIndex] = temp;
+                        this.syncToCloud();
+                    }
+                },
+
+                openTeacherModal(mode, t = null) {
+                    this.teacherModalMode = mode;
+                    if (mode === 'edit' && t) {
+                        this.teacherForm = { ...t };
+                    } else {
+                        this.teacherForm = { 
+                            id: 't_' + Date.now(), 
+                            name: '', 
+                            group: this.learningAreas[0], 
+                            position: 'ครู', 
+                            color: '#bfdbfe' 
+                        };
+                    }
+                    this.showTeacherModal = true;
+                },
+                saveTeacher() {
+                    if (!this.teacherForm.name) return;
+                    if (this.teacherModalMode === 'add') {
+                        this.teachers.push({ ...this.teacherForm });
+                    } else {
+                        let idx = this.teachers.findIndex(t => t.id === this.teacherForm.id);
+                        if (idx !== -1) {
+                            this.teachers[idx] = { ...this.teacherForm };
+                        }
+                    }
+                    this.showTeacherModal = false;
+                    this.syncToCloud();
+                },
+                deleteTeacher(id) {
+                    if (confirm('คุณต้องการลบรายชื่อครูท่านนี้ใช่หรือไม่?')) {
+                        this.teachers = this.teachers.filter(t => t.id !== id);
+                        this.syncToCloud();
+                    }
+                },
+                moveTeacher(index, direction) {
+                    let newIdx = index + direction;
+                    if (newIdx >= 0 && newIdx < this.teachers.length) {
+                        let temp = this.teachers[index];
+                        this.teachers[index] = this.teachers[newIdx];
+                        this.teachers[newIdx] = temp;
+                        this.syncToCloud();
+                    }
+                },
+
+                addClass() {
+                    let name = prompt('กรุณากรอกชื่อห้องเรียน (เช่น ป.1, ม.1):');
+                    if (name) {
+                        let newClassId = 'cls_' + Date.now();
+                        this.classes.push({ id: newClassId, name: name, active: true, homeroomTeacherId: '' });
+                        if (!this.selectedClassId) this.selectedClassId = newClassId;
+                        if (!this.subjectFilterClassId) this.subjectFilterClassId = newClassId;
+                        this.syncToCloud();
+                    }
+                },
+                moveClass(index, direction) {
+                    let newIdx = index + direction;
+                    if (newIdx >= 0 && newIdx < this.classes.length) {
+                        let temp = this.classes[index];
+                        this.classes[index] = this.classes[newIdx];
+                        this.classes[newIdx] = temp;
+                        this.syncToCloud();
+                    }
+                },
+                deleteClass(id) {
+                    if (confirm('คุณต้องการลบห้องเรียนนี้ใช่หรือไม่?')) {
+                        this.classes = this.classes.filter(c => c.id !== id);
+                        this.syncToCloud();
+                    }
+                },
+
+                exportDataJSON() {
+                    const data = {
+                        schoolConfig: this.schoolConfig,
+                        classes: this.classes,
+                        teachers: this.teachers,
+                        subjects: this.subjects,
+                        periods: this.periods,
+                        learningAreas: this.learningAreas,
+                        timetable: this.timetable,
+                        substituteLogs: this.substituteLogs
+                    };
+                    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `school_timetable_backup_${new Date().toISOString().slice(0, 10)}.json`;
+                    a.click();
+                },
+                importDataJSON(event) {
+                    const file = event.target.files[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        try {
+                            const data = JSON.parse(e.target.result);
+                            this.schoolConfig = data.schoolConfig || this.schoolConfig;
+                            this.classes = data.classes || [];
+                            this.teachers = data.teachers || [];
+                            this.subjects = data.subjects || [];
+                            this.periods = data.periods || this.periods;
+                            this.learningAreas = data.learningAreas || this.learningAreas;
+                            this.timetable = data.timetable || {};
+                            this.substituteLogs = data.substituteLogs || [];
+                            if (this.classes.length > 0) {
+                                this.selectedClassId = this.classes[0].id;
+                                this.subjectFilterClassId = this.classes[0].id;
+                            }
+                            if (this.teachers.length > 0) {
+                                this.selectedTeacherId = this.teachers[0].id;
+                            }
+                            this.syncToCloud();
+                            alert('นำเข้าข้อมูลสำเร็จเรียบร้อย');
+                            this.showDataModal = false;
+                        } catch (err) {
+                            alert('ไฟล์ JSON ไม่ถูกต้อง กรุณาตรวจสอบอีกครั้ง');
+                        }
+                    };
+                    reader.readAsText(file);
+                }
+            };
+        }
+    </script>
+</body>
+</html>
