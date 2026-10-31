@@ -986,24 +986,33 @@
 
     <!-- Class Batch Subject Edit Modal -->
     <div x-show="showBatchModal" class="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50" style="display: none;">
-        <div class="bg-white rounded-2xl shadow-xl max-w-2xl w-full p-6 space-y-4 max-h-[85vh] flex flex-col">
+        <div class="bg-white rounded-2xl shadow-xl max-w-4xl w-full p-6 space-y-4 max-h-[85vh] flex flex-col">
             <h3 class="font-bold text-gray-800 text-lg border-b pb-2 flex items-center justify-between">
-                <span>แก้ไขรายวิชาทั้งชั้น: <span class="text-indigo-600" x-text="getClassName(subjectFilterClassId)"></span></span>
-                <span class="text-xs font-normal text-gray-500">ปรับแต่งรายวิชาทั้งหมดของห้องนี้พร้อมกัน</span>
+                <span>แก้ไขรายวิชาและครูประจำรายวิชาทั้งชั้น: <span class="text-indigo-600" x-text="getClassName(subjectFilterClassId)"></span></span>
+                <span class="text-xs font-normal text-gray-500">ปรับแต่งรายวิชาและครูผู้สอนทั้งหมดของห้องนี้พร้อมกัน</span>
             </h3>
 
             <div class="overflow-y-auto flex-grow space-y-3 pr-1">
                 <template x-for="(subj, idx) in batchEditSubjectsList" :key="subj.id">
                     <div class="p-3 bg-gray-50 border border-gray-200 rounded-xl grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
-                        <div class="sm:col-span-3">
+                        <div class="sm:col-span-2">
                             <label class="block text-[10px] text-gray-500 mb-0.5">รหัสวิชา</label>
                             <input type="text" x-model="subj.code" class="w-full border rounded px-2 py-1 text-xs bg-white">
                         </div>
-                        <div class="sm:col-span-5">
+                        <div class="sm:col-span-4">
                             <label class="block text-[10px] text-gray-500 mb-0.5">ชื่อรายวิชา</label>
                             <input type="text" x-model="subj.name" class="w-full border rounded px-2 py-1 text-xs bg-white">
                         </div>
                         <div class="sm:col-span-3">
+                            <label class="block text-[10px] text-gray-500 mb-0.5">ครูประจำวิชา</label>
+                            <select x-model="subj.teacherId" class="w-full border rounded px-2 py-1 text-xs bg-white text-indigo-900 font-semibold">
+                                <option value="">-- เลือกครูผู้สอน --</option>
+                                <template x-for="t in teachers" :key="t.id">
+                                    <option :value="t.id" x-text="t.name"></option>
+                                </template>
+                            </select>
+                        </div>
+                        <div class="sm:col-span-2">
                             <label class="block text-[10px] text-gray-500 mb-0.5">ชม./สัปดาห์</label>
                             <input type="number" x-model.number="subj.hours" class="w-full border rounded px-2 py-1 text-xs bg-white">
                         </div>
@@ -1130,7 +1139,7 @@
 
     <!-- JavaScript Application Logic -->
     <script>
-        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxfMuljVC1gewsjtLbbIUzx9Rm7Myy75Xo12d5ngdiHPa9gKFTkrmvpIwEUFzVa3CiA/exec";
+        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxfMuljVC1gewsjtLbbIUzx9Rm7Myy75Xo12d5ngdiHPa9gKFTkrmvpIwEUFzVa3CiA/exec/exec";
 
         function appData() {
             return {
