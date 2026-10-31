@@ -79,7 +79,7 @@
                </div>
                <div class="space-y-2">
                    <h2 class="text-2xl font-bold text-gray-900">เข้าสู่ระบบตารางสอน</h2>
-                   <p class="text-xs text-gray-500">กรุณากรอกรหัสผ่านเพื่อเข้าใช้งานระบบบริหารจัดการสถานศึกษา </p>
+                   <p class="text-xs text-gray-500">กรุณากรอกรหัสผ่านเพื่อเข้าใช้งานระบบบริหารจัดการสถานศึกษา</p>
                </div>
 
                <form @submit.prevent="authenticate()" class="space-y-4">
@@ -97,7 +97,7 @@
                    </div>
 
                    <template x-if="loginError">
-                       <p class="text-xs text-rose-600 font-semibold animate-shake">รหัสผ่านไม่ถูกต้อง (ลองใหม่)</p>
+                       <p class="text-xs text-rose-600 font-semibold animate-shake">รหัสผ่านไม่ถูกต้อง (ลองใช้ 123456)</p>
                    </template>
 
                    <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-indigo-600/30 transition transform hover:-translate-y-0.5">
@@ -1156,11 +1156,8 @@ function doPost(e) {
   if (!sheet) { sheet = ss.insertSheet(SHEET_NAME); }
   
   try {
-    // รองรับทั้งข้อมูลแบบส่งผ่าน e.postData.contents หรือพารามิเตอร์ปกติ
     var rawData = e.postData ? e.postData.contents : null;
     var contents = JSON.parse(rawData);
-    
-    // ตรวจสอบโครงสร้างคำขอ save
     var payloadData = contents.payload ? contents.payload : contents;
     var dataString = JSON.stringify(payloadData);
     
@@ -1184,8 +1181,7 @@ function doPost(e) {
 
     <!-- JavaScript Application Logic -->
     <script>
-        const GOOGLE_SCRIPT_URL = "
-https://script.google.com/macros/s/AKfycbzCdyuNIxhZwEaH50ATdspZGuEh4QRrbvaIVh-aKLz9Di9nHBl3Ga17HQfI1dkAU4s/exec ";
+        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzCdyuNIxhZwEaH50ATdspZGuEh4QRrbvaIVh-aKLz9Di9nHBl3Ga17HQfI1dkAU4s/exec";
 
         function appData() {
             return {
@@ -1292,7 +1288,6 @@ https://script.google.com/macros/s/AKfycbzCdyuNIxhZwEaH50ATdspZGuEh4QRrbvaIVh-aK
                editingSubIndex: null,
 
                initSystem() {
-                   // โหลดข้อมูลจาก Google Sheets ทันทีเมื่อเปิดระบบ
                    this.fetchFromCloud();
                },
 
@@ -1371,7 +1366,6 @@ https://script.google.com/macros/s/AKfycbzCdyuNIxhZwEaH50ATdspZGuEh4QRrbvaIVh-aK
                    };
 
                    try {
-                       // ใช้ standard fetch แบบปกติ (รองรับ CORS หาก Google Apps Script deploy เป็น Anyone และรับ POST ได้ถูกต้อง)
                        await fetch(GOOGLE_SCRIPT_URL, {
                            method: 'POST',
                            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -1397,7 +1391,6 @@ https://script.google.com/macros/s/AKfycbzCdyuNIxhZwEaH50ATdspZGuEh4QRrbvaIVh-aK
                        const text = await res.text();
                        if (text) {
                            const resJson = JSON.parse(text);
-                           // ตรวจสอบว่าข้อมูลอยู่ในรูปแบบสตริงหรืออ็อบเจกต์
                            let data = resJson.data;
                            if (typeof data === 'string') {
                                data = JSON.parse(data);
@@ -1604,8 +1597,7 @@ https://script.google.com/macros/s/AKfycbzCdyuNIxhZwEaH50ATdspZGuEh4QRrbvaIVh-aK
                    return count;
                },
 
-                getAvailableTeachers(periodIndex) {
-                   // แปลงวันที่ลาเพื่อหาว่าเป็นวันอะไร (0=อาทิตย์, 1=จันทร์, ..., 5=ศุกร์)
+               getAvailableTeachers(periodIndex) {
                    let dayId = 'mon';
                    if (this.subForm.date) {
                        let d = new Date(this.subForm.date);
@@ -1615,13 +1607,9 @@ https://script.google.com/macros/s/AKfycbzCdyuNIxhZwEaH50ATdspZGuEh4QRrbvaIVh-aK
                    }
 
                    return this.teachers.filter(t => {
-                       // ห้ามแสดงครูผู้ลาเองในรายชื่อครูว่าง
                        if (t.id === this.subForm.absentTeacherId) return false;
-
-                       // ตรวจสอบว่าในวันที่เลือกและคาบเวลานี้ ครูมีตารางสอนอยู่แล้วหรือไม่
                        let cell = this.getTeacherCell(t.id, dayId, periodIndex);
-                       if (cell) return false; // ถ้ามีสอนแล้ว ไม่ถือว่าว่าง
-
+                       if (cell) return false;
                        return true;
                    }).sort((a, b) => this.getTeacherTotalHours(a.id) - this.getTeacherTotalHours(b.id));
                },
@@ -1894,7 +1882,6 @@ https://script.google.com/macros/s/AKfycbzCdyuNIxhZwEaH50ATdspZGuEh4QRrbvaIVh-aK
                            this.periods = data.periods || this.periods;
                            this.learningAreas = data.learningAreas || this.learningAreas;
                            
-                           // คืนค่าตารางสอนและประวัติการสอนแทนจากไฟล์สำรอง (ไม่ลบทิ้ง)
                            this.timetable = data.timetable || {};
                            this.substituteLogs = data.substituteLogs || [];
 
